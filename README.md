@@ -21,7 +21,7 @@ To run this project, you will need:
 
 1. Clone the project:
     ```sh
-    git clone https://github.com/username/network-chat-app.git
+    https://github.com/ozcantolgahan/chat_server.git
     cd network-chat-app
     ```
 
