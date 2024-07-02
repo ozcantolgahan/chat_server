@@ -7,7 +7,7 @@ class Client
 {
 public:
     Client(const std::string &ip, int port);
-    void run();
+    void run(const std::string &username);
 
 private:
     int client_socket;
@@ -15,6 +15,7 @@ private:
     int port;
 
     void receive_messages();
+    std::string get_timestamp();
 };
 
-#endif // CLIENT_HPP
+#endif
