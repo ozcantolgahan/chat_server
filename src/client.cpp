@@ -3,10 +3,11 @@
 #include <thread>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <ctime>
 
 Client::Client(const std::string &ip, int port) : ip(ip), port(port) {}
 
-void Client::run()
+void Client::run(const std::string &username)
 {
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (client_socket == -1)
@@ -27,6 +28,7 @@ void Client::run()
     }
 
     std::cout << "Connected to server." << std::endl;
+    send(client_socket, username.c_str(), username.size(), 0);
 
     std::thread(&Client::receive_messages, this).detach();
 
@@ -54,6 +56,16 @@ void Client::receive_messages()
         }
 
         buffer[bytes_received] = '\0';
-        std::cout << "Received: " << buffer << std::endl;
+        std::cout << "Received (" << get_timestamp() << "): " << buffer << std::endl;
     }
+}
+
+std::string Client::get_timestamp()
+{
+    time_t now = time(0);
+    char buf[80];
+    struct tm tstruct;
+    tstruct = *localtime(&now);
+    strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
+    return buf;
 }
