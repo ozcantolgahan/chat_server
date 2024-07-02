@@ -9,7 +9,39 @@
 
 std::ofstream log_file("server_log.txt", std::ios_base::app);
 
-Server::Server(int port) : port(port) {}
+Server::Server(int port) : port(port), ssl_context(nullptr)
+{
+    initialize_ssl();
+}
+
+Server::~Server()
+{
+    SSL_CTX_free(ssl_context);
+}
+
+void Server::initialize_ssl()
+{
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    ssl_context = SSL_CTX_new(SSLv23_server_method());
+    if (!ssl_context)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    SSL_CTX_set_ecdh_auto(ssl_context, 1);
+
+    if (SSL_CTX_use_certificate_file(ssl_context, "server-cert.pem", SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    if (SSL_CTX_use_PrivateKey_file(ssl_context, "server-key.pem", SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+}
 
 void Server::run()
 {
@@ -52,21 +84,31 @@ void Server::run()
             continue;
         }
 
+        SSL *ssl = SSL_new(ssl_context);
+        SSL_set_fd(ssl, client_socket);
+        if (SSL_accept(ssl) <= 0)
+        {
+            ERR_print_errors_fp(stderr);
+            close(client_socket);
+            continue;
+        }
+
         std::cout << "Client connected." << std::endl;
         log_message("Client connected.");
 
-        std::thread(&Server::handle_client, this, client_socket).detach();
+        std::thread(&Server::handle_client, this, client_socket, ssl).detach();
     }
 
     close(server_socket);
 }
 
-void Server::handle_client(int client_socket)
+void Server::handle_client(int client_socket, SSL *ssl)
 {
     char username[1024];
-    ssize_t bytes_received = recv(client_socket, username, sizeof(username), 0);
+    ssize_t bytes_received = SSL_read(ssl, username, sizeof(username));
     if (bytes_received <= 0)
     {
+        SSL_shutdown(ssl);
         close(client_socket);
         return;
     }
@@ -89,7 +131,7 @@ void Server::handle_client(int client_socket)
         {
             if (client != client_socket)
             {
-                send(client, welcome_message.c_str(), welcome_message.size(), 0);
+                SSL_write(ssl, welcome_message.c_str(), welcome_message.size());
             }
         }
     }
@@ -97,11 +139,12 @@ void Server::handle_client(int client_socket)
     char buffer[1024];
     while (true)
     {
-        ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
+        ssize_t bytes_received = SSL_read(ssl, buffer, sizeof(buffer));
         if (bytes_received <= 0)
         {
             std::cout << "Client disconnected." << std::endl;
             log_message("Client disconnected.");
+            SSL_shutdown(ssl);
             close(client_socket);
             {
                 std::lock_guard<std::mutex> lock(clients_mutex);
@@ -127,13 +170,12 @@ void Server::handle_client(int client_socket)
                 if (pair.second == recipient)
                 {
                     std::string private_msg_with_sender = "[Private] " + user + ": " + private_message;
-                    send(pair.first, private_msg_with_sender.c_str(), private_msg_with_sender.size(), 0);
+                    SSL_write(ssl, private_msg_with_sender.c_str(), private_msg_with_sender.size());
                     break;
                 }
             }
             continue;
         }
-
         if (message == "/users")
         {
             std::lock_guard<std::mutex> lock(clients_mutex);
@@ -142,7 +184,7 @@ void Server::handle_client(int client_socket)
             {
                 user_list += pair.second + "\n";
             }
-            send(client_socket, user_list.c_str(), user_list.size(), 0);
+            SSL_write(ssl, user_list.c_str(), user_list.size());
             continue;
         }
 
@@ -154,7 +196,7 @@ void Server::handle_client(int client_socket)
         {
             if (client != client_socket)
             {
-                send(client, message_with_timestamp.c_str(), message_with_timestamp.size(), 0);
+                SSL_write(ssl, message_with_timestamp.c_str(), message_with_timestamp.size());
             }
         }
     }
